@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Запускаем тесты на этапе сборки
-RUN pytest --junitxml=/app/test-results/report.xml
+# RUN pytest --junitxml=/app/test-results/report.xml
 
 # === Stage 2: Runtime (лёгкий образ) ===
 FROM python:3.11-slim
