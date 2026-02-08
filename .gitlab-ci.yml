@@ -1,0 +1,97 @@
+stages:
+  - lint
+  - test
+  - build
+  - scan
+  - deploy
+  - rollback
+
+variables:
+  IMAGE_TAG: $CI_COMMIT_SHA
+  IMAGE_NAME: $CI_REGISTRY_IMAGE
+
+# ================== LINT ==================
+lint:
+  stage: lint
+  image: python:3.11-slim
+  before_script:
+    - pip install ruff
+  script:
+    - ruff check .
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# ================== TEST ==================
+test:
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install -r requirements.txt
+  script:
+    - pytest --junitxml=report.xml
+  artifacts:
+    reports:
+      junit: report.xml
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# ================== BUILD ==================
+build:
+  stage: build
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+  script:
+    - docker build -t $IMAGE_NAME:$IMAGE_TAG .
+    - docker push $IMAGE_NAME:$IMAGE_TAG
+    - echo "IMAGE_TAG=$IMAGE_TAG" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# ================== SCAN (Trivy) ==================
+scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - trivy image --exit-code 1 --severity HIGH,CRITICAL $IMAGE_NAME:$IMAGE_TAG
+  needs: ["build"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == "main"
+    - if: $CI_COMMIT_TAG =~ /^v/
+
+# ================== DEPLOY ==================
+deploy:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl set image deployment/flask-app flask=$IMAGE_NAME:$IMAGE_TAG
+    - kubectl rollout status deployment/flask-app --timeout=120s
+  environment: production
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: manual
+    - if: $CI_COMMIT_TAG =~ /^v/
+      when: on_success
+
+# ================== ROLLBACK ==================
+rollback:
+  stage: rollback
+  image: bitnami/kubectl:latest
+  script:
+    - kubectl rollout undo deployment/flask-app
+  when: manual
+  environment: production

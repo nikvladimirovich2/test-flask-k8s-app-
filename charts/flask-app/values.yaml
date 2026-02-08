@@ -1,0 +1,29 @@
+replicaCount: 2
+
+image:
+  repository: YOUR_REGISTRY/flask-app
+  pullPolicy: IfNotPresent
+  tag: "latest"          # будет переопределяться в CI
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 5000
+
+env:
+  DATABASE_URL: ""       # будет браться из Secret
+
+resources: {}
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+externalPostgres:
+  enabled: true
+  secretName: "postgres-credentials"   # ← внешний Secret, создаётся вне чарта
+  secretKeys:
+    urlKey: "DATABASE_URL"             # или отдельно host, port, user, password
